@@ -1013,8 +1013,14 @@ type embeddingCache struct {
 }
 
 func saveEmbeddingCache(tree *CategoryTree, cacheFile string, config Config) error {
+	// Determine the model name that was actually used
+	modelUsed := config.OpenAIModel // Default to OpenAI model
+	if config.EmbeddingProvider == "ollama" {
+		modelUsed = config.OllamaModel // Use Ollama model if provider is ollama
+	}
+
 	cache := embeddingCache{
-		Model:     config.OpenAIModel,
+		Model:     modelUsed, // Use the determined model name
 		Dimension: config.EmbeddingDimension,
 		Embeddings: make(map[string][]float32),
 	}
