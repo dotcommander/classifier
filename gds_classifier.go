@@ -25,7 +25,6 @@ import (
 // Constants
 const (
 	MaxContentLength = 4000 // Maximum characters to process from each file
-	EmbeddingDim    = 1536  // Dimension of OpenAI text-embedding-3-small embeddings
 
 	DefaultEmbeddingProvider = "openai"
 	DefaultOpenAIModel      = "text-embedding-3-small" // Default if not overridden
@@ -37,7 +36,9 @@ type Config struct {
 	OutputDir       string
 	MappingFile     string
 	Move            bool
+	Copy            bool // New field for copy operation
 	DryRun          bool
+	EmbeddingDimension int // Dimension of embeddings for the configured model
 	Include         string
 	Exclude         string
 	Concurrency     int
@@ -93,6 +94,13 @@ type GDSNode struct {
 func main() {
 	// Parse command line arguments
 	config := parseArgs()
+
+	// Determine the expected embedding dimension for the configured model
+	dimension, err := getEmbeddingDimension(config)
+	if err != nil {
+		log.Fatalf("Error determining embedding dimension for model '%s': %v", config.OpenAIModel, err)
+	}
+	config.EmbeddingDimension = dimension
 
 	// Get API key from environment
 	config.OpenAIAPIKey = os.Getenv("OPENAI_API_KEY")
@@ -179,7 +187,7 @@ func main() {
 	useCache := false
 	if info, err := os.Stat(cacheFile); err == nil {
 		if info.ModTime().After(yamlInfo.ModTime()) {
-			if err := loadEmbeddingCache(categoryTree, cacheFile); err == nil {
+			if err := loadEmbeddingCache(categoryTree, cacheFile, config); err == nil {
 				log.Println("✅ loaded category embeddings from cache")
 				useCache = true
 			} else {
@@ -194,7 +202,7 @@ func main() {
 		if err := generateCategoryEmbeddings(categoryTree, config); err != nil {
 			log.Fatalf("Error generating category embeddings: %v", err)
 		}
-		if err := saveEmbeddingCache(categoryTree, cacheFile); err != nil {
+		if err := saveEmbeddingCache(categoryTree, cacheFile, config); err != nil {
 			log.Printf("⚠️ failed to write embedding cache: %v", err)
 		} else {
 			log.Printf("✅ wrote embedding cache to %s", cacheFile)
@@ -249,11 +257,13 @@ func parseArgs() Config {
 	outputDir := flag.String("output", "classified_files", "Output directory for sorted files")
 	mappingFile := flag.String("mapping", "gds.yaml", "Path to GDS category mapping file")
 	move := flag.Bool("move", false, "Move files instead of copying")
-	dryRun := flag.Bool("dry-run", false, "Show what would be done without actually moving/copying files")
+	copyFlag := flag.Bool("copy", false, "Copy files to the output directory (default is no file operation)")
+	dryRun := flag.Bool("dry-run", false, "Show what would be done without actually performing file operations")
 	include := flag.String("include", "", "Additional file extensions to include (comma-separated)")
 	exclude := flag.String("exclude", "", "Directories or file patterns to exclude (comma-separated)")
 	concurrency := flag.Int("concurrency", 4, "Number of concurrent file processes")
-	logFile := flag.String("log-file", "", "Optional: Path to CSV file for logging classification details")
+	logFile := flag.String("log-file", "classification.csv", "Optional: Path to CSV file for logging classification details (default: classification.csv). Use -log-file=\"\" to disable.")
+	ollamaShortcut := flag.Bool("ollama", false, "Use Ollama provider with default URL (http://localhost:11434) and model (nomic-embed-text)")
 
 	// Add new flags for embedding provider configuration
 	embeddingProvider := flag.String("embedding-provider", DefaultEmbeddingProvider, "Embedding provider ('openai' or 'ollama')")
@@ -267,6 +277,18 @@ func parseArgs() Config {
 	args := flag.Args()
 	if len(args) > 0 && *sourceDir == "" {
 		*sourceDir = args[0]
+	}
+
+	// If --ollama shortcut is used, override provider and default ollama settings
+	if *ollamaShortcut {
+		*embeddingProvider = "ollama"
+		*ollamaURL = "http://localhost:11434"
+		*ollamaModel = "nomic-embed-text"
+	}
+
+	// Validate move/copy flags
+	if *move && *copyFlag {
+		log.Fatal("Error: Cannot use both -move and -copy flags simultaneously")
 	}
 
 	if *sourceDir == "" {
@@ -334,6 +356,7 @@ func parseArgs() Config {
 		OutputDir:     *outputDir,
 		MappingFile:   *mappingFile,
 		Move:          *move,
+		Copy:          *copyFlag,
 		DryRun:        *dryRun,
 		Include:       *include,
 		Exclude:       *exclude,
@@ -348,6 +371,36 @@ func parseArgs() Config {
 		OpenAIModel:       *openaiModel,
 		OllamaURL:         *ollamaURL,
 		OllamaModel:       *ollamaModel,
+	}
+}
+
+// getEmbeddingDimension returns the expected embedding dimension for the configured model
+func getEmbeddingDimension(config Config) (int, error) {
+	switch config.EmbeddingProvider {
+	case "openai":
+		// Known dimensions for common OpenAI models
+		switch config.OpenAIModel {
+		case "text-embedding-3-small":
+			return 1536, nil
+		case "text-embedding-3-large":
+			return 3072, nil
+		}
+		// For other OpenAI models or compatible APIs, we might need to query the API or rely on a default
+		return 1536, nil // Default to common dimension if model is unknown
+	case "ollama":
+		// Known dimensions for common Ollama embedding models
+		switch config.OllamaModel {
+		case "nomic-embed-text":
+			return 768, nil
+		case "all-minilm": // Example of another common Ollama model
+			return 384, nil
+		}
+		// Ollama API doesn't typically provide model dimensions directly via a standard endpoint.
+		// We might need to hardcode common ones or add a flag for custom dimensions.
+		// For now, return an error for unknown Ollama models to be safe.
+		return 0, fmt.Errorf("unknown Ollama model '%s'. Cannot determine embedding dimension. Please specify a known model or add its dimension lookup.", config.OllamaModel)
+	default:
+		return 0, fmt.Errorf("unknown embedding provider '%s'", config.EmbeddingProvider)
 	}
 }
 
@@ -801,6 +854,14 @@ func organizeFiles(matches []CategoryMatch, config Config, csvLogWriter *csv.Wri
 	// Create stats to track
 	categoryStats := make(map[string]int)
 
+	// Create the main output directory if it doesn't exist, unless it's a dry run
+	// The stats file is written here, so it's needed even without copy/move.
+	if !config.DryRun {
+		if err := os.MkdirAll(config.OutputDir, 0755); err != nil {
+			return fmt.Errorf("error creating output directory %s: %w", config.OutputDir, err)
+		}
+	}
+
 	for _, match := range matches {
 		// --- Logging Logic ---
 		if csvLogWriter != nil {
@@ -830,14 +891,16 @@ func organizeFiles(matches []CategoryMatch, config Config, csvLogWriter *csv.Wri
 				log.Printf("Warning: Failed to write log record for '%s' to '%s': %v", filePath, config.LogFile, err)
 			}
 		}
-		// Create directory path based on category
+		// Determine the target directory path
 		categoryPath := match.CategoryPath
 		dirPath := filepath.Join(config.OutputDir, categoryPath)
 
-		// Create the directory if it doesn't exist
-		if !config.DryRun {
+		// Create the directory if a file operation is planned and not dry run
+		// This creates the *subdirectories* within the main output directory.
+		if !config.DryRun && (config.Move || config.Copy) {
 			if err := os.MkdirAll(dirPath, 0755); err != nil {
-				return fmt.Errorf("error creating directory %s: %w", dirPath, err)
+				log.Printf("Error creating directory %s: %v. Skipping organization for %s", dirPath, err, match.FilePath)
+				continue // Skip organizing this file
 			}
 		}
 
@@ -845,7 +908,7 @@ func organizeFiles(matches []CategoryMatch, config Config, csvLogWriter *csv.Wri
 		fileName := filepath.Base(match.FilePath)
 		destPath := filepath.Join(dirPath, fileName)
 
-		// Copy or move the file
+		// Perform Copy or Move operation if configured and not dry run
 		if !config.DryRun {
 			if config.Move {
 				if err := moveFile(match.FilePath, destPath); err != nil {
@@ -853,7 +916,7 @@ func organizeFiles(matches []CategoryMatch, config Config, csvLogWriter *csv.Wri
 					continue
 				}
 				log.Printf("Moved %s to %s", match.FilePath, destPath)
-			} else {
+			} else if config.Copy {
 				if err := copyFile(match.FilePath, destPath); err != nil {
 					log.Printf("Error copying %s to %s: %v", match.FilePath, destPath, err)
 					continue
@@ -862,8 +925,11 @@ func organizeFiles(matches []CategoryMatch, config Config, csvLogWriter *csv.Wri
 			}
 		} else {
 			operation := "Would move"
-			if !config.Move {
+			if config.Copy {
 				operation = "Would copy"
+			} else if !config.Move && !config.Copy {
+				log.Printf("Would classify '%s' to '%s' (Score: %.4f) but no file operation specified.", match.FilePath, match.CategoryPath, match.Score)
+				continue
 			}
 			log.Printf("%s %s to %s", operation, match.FilePath, destPath)
 		}
@@ -882,11 +948,11 @@ func organizeFiles(matches []CategoryMatch, config Config, csvLogWriter *csv.Wri
 
 		jsonData, err := json.MarshalIndent(stats, "", "  ")
 		if err != nil {
-			return fmt.Errorf("error marshaling stats: %w", err)
+			log.Printf("Warning: error marshaling stats: %v", err) // Log warning, don't stop the whole process just for stats
 		}
 
 		if err := os.WriteFile(statsPath, jsonData, 0644); err != nil {
-			return fmt.Errorf("error writing stats file: %w", err)
+			log.Printf("Warning: error writing stats file '%s': %v", statsPath, err)
 		}
 
 		log.Printf("Wrote stats to %s", statsPath)
@@ -940,14 +1006,22 @@ func moveFile(src, dst string) error {
 
 // embedding cache helpers
 
-type embeddingCache map[string][]float32
+type embeddingCache struct {
+	Model     string             `json:"model"` // Model name used for embeddings
+	Dimension int                `json:"dimension"` // Dimension of embeddings
+	Embeddings map[string][]float32 `json:"embeddings"`
+}
 
-func saveEmbeddingCache(tree *CategoryTree, cacheFile string) error {
-	cache := make(embeddingCache)
+func saveEmbeddingCache(tree *CategoryTree, cacheFile string, config Config) error {
+	cache := embeddingCache{
+		Model:     config.OpenAIModel,
+		Dimension: config.EmbeddingDimension,
+		Embeddings: make(map[string][]float32),
+	}
 	for _, path := range tree.ValidPaths {
 		cat := getCategoryByPath(tree.Root, path)
 		if cat != nil && len(cat.Vector) > 0 {
-			cache[path] = cat.Vector
+			cache.Embeddings[path] = cat.Vector
 		}
 	}
 	data, err := json.MarshalIndent(cache, "", "  ")
@@ -957,16 +1031,30 @@ func saveEmbeddingCache(tree *CategoryTree, cacheFile string) error {
 	return os.WriteFile(cacheFile, data, 0644)
 }
 
-func loadEmbeddingCache(tree *CategoryTree, cacheFile string) error {
+func loadEmbeddingCache(tree *CategoryTree, cacheFile string, config Config) error {
 	data, err := os.ReadFile(cacheFile)
 	if err != nil {
 		return err
 	}
-	cache := make(embeddingCache)
+	var cache embeddingCache
 	if err := json.Unmarshal(data, &cache); err != nil {
 		return err
 	}
-	for path, vec := range cache {
+
+	// Validate cache metadata against current configuration
+	currentModelName := config.OpenAIModel
+	if config.EmbeddingProvider == "ollama" {
+		currentModelName = config.OllamaModel
+	}
+
+	if cache.Model != currentModelName || cache.Dimension != config.EmbeddingDimension {
+		log.Printf("Warning: Embedding cache mismatch. Cached Model: '%s' (Dim: %d), Current Model: '%s' (Dim: %d). Discarding cache.",
+			cache.Model, cache.Dimension, currentModelName, config.EmbeddingDimension)
+		return fmt.Errorf("embedding cache mismatch")
+	}
+
+	// Corrected: Access the Embeddings map within the cache struct
+	for path, vec := range cache.Embeddings {
 		cat := getCategoryByPath(tree.Root, path)
 		if cat != nil {
 			cat.Vector = vec

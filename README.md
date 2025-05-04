@@ -1,6 +1,6 @@
 # GDS File Classifier
 
-A Go-based CLI tool that uses AI vector embeddings to classify and organize files according to a user-defined category structure defined in a YAML file. This tool automatically matches files to the appropriate category based on their semantic content, using configurable embedding providers like OpenAI (including compatible local servers) or Ollama.
+A Go-based CLI tool that uses AI vector embeddings to classify and organize files according to a user-defined category structure defined in a YAML file. This tool automatically matches files to the appropriate category based on their semantic content, using configurable embedding providers like **OpenAI (the default)**, OpenAI-compatible local servers, or Ollama.
 
 *(Note: While originally named for "Gary's Directory System", the tool is flexible and works with **any** category structure you define in the YAML mapping file.)*
 
@@ -9,7 +9,7 @@ A Go-based CLI tool that uses AI vector embeddings to classify and organize file
 The tool classifies files based on their content's semantic similarity to your defined categories. It works by:
 
 1.  Loading your category system (hierarchy, names, descriptions) from the YAML file specified via `-mapping`.
-2.  Generating rich vector embeddings for each valid category (`_valid: true`) using its path and `_description`. This uses a configured embedding provider (OpenAI/compatible or Ollama). Embeddings are cached in a `.embeddings.json` file for faster subsequent runs.
+2.  Generating rich vector embeddings for each valid category (`_valid: true`) using its path and `_description`. This uses a configured embedding provider (**OpenAI by default**, or Ollama/compatible). Embeddings are cached in a `.embeddings.json` file for faster subsequent runs.
 3.  Extracting text content from your source files. *(Current limitation: Text extraction is basic, primarily reading text-based files directly. Binary files like PDF/DOCX are handled simplistically. See "Extending the System".)*
 4.  Creating embeddings for the extracted file content using the same provider.
 5.  Calculating the cosine similarity between each file's embedding and every valid category's embedding.
@@ -21,7 +21,7 @@ The tool classifies files based on their content's semantic similarity to your d
 
 *   **Go:** Version 1.16 or later installed.
 *   **API Access/Local Model:**
-    *   For OpenAI: An OpenAI API key.
+    *   **For the default OpenAI provider:** An OpenAI API key.
     *   For Ollama: A running Ollama instance with the desired embedding model pulled (e.g., `ollama pull nomic-embed-text`).
     *   For local OpenAI-compatible servers (LM Studio, Jan, etc.): A running server endpoint.
 
@@ -45,33 +45,28 @@ The tool classifies files based on their content's semantic similarity to your d
     ```
     *(Alternatively, if using the Taskfile: `task build` which places it in `./bin/gds-classifier`)*
 
-4.  **Configure API Key (if using OpenAI):**
+4.  **Configure API Key (Required for default OpenAI provider):**
     Set your OpenAI API key. You can do this via an environment variable:
     ```bash
     export OPENAI_API_KEY="your_openai_api_key_here"
     ```
-    Or, create a `.env` file in the project root (recommended):
-    ```dotenv
-    # .env
-    OPENAI_API_KEY=your_openai_api_key_here
-    ```
-    The tool will automatically load the key from the `.env` file if present. *(Note: If using a local server that doesn't require a key, you might set `OPENAI_API_KEY="NA"` or similar).*
 
 ## Minimal Setup
 
-To build and run the `gds-classifier` with its default settings, you only need the following core files from the repository:
+To build and run the `gds-classifier` with its default settings (using OpenAI), you only need the following core files from the repository:
 
 1.  `gds_classifier.go` - The main application source code.
 2.  `go.mod` - Defines the project module and dependencies.
 3.  `go.sum` - Ensures reproducible dependency builds.
 4.  `gds.yaml` - The default category mapping file required by the classifier at runtime (or your own custom YAML file).
 
-With these files, the Go compiler installed, and API access configured (if needed), you can build and run the tool as shown in the Installation and Usage sections.
+With these files, the Go compiler installed, and an OpenAI API key configured, you can build and run the tool as shown in the Installation and Usage sections.
 
 ## Usage
 
-Basic usage (uses `./gds.yaml` by default):
+Basic usage (uses `./gds.yaml` and the **default OpenAI provider**):
 ```bash
+# Ensure OPENAI_API_KEY is set. This command will log classification to classification.csv by default.
 ./gds-classifier -source /path/to/directory/to/classify
 ```
 
@@ -83,8 +78,8 @@ Specify a custom mapping file and output directory:
 This will:
 - Load your category system from the specified YAML file.
 - Scan all supported files in the source directory.
-- Classify files into the appropriate categories based on semantic similarity.
-- Copy them to the output directory, organized according to your defined structure.
+- Classify files into the appropriate categories based on semantic similarity using the configured provider (OpenAI by default).
+- Log the classification results to `classification.csv` by default. **No files are copied or moved unless you use the `-copy` or `-move` flags.**
 
 ### Options
 
@@ -96,9 +91,11 @@ This will:
 *   `-source`: Source directory containing files to classify (required, can also be specified as the first argument).
 *   `-output`: Output directory for sorted files (default: `"classified_files"`).
 *   `-mapping`: Path to your category mapping YAML file (default: `"gds.yaml"`).
-*   `-move`: Move files instead of copying them (default: `false`).
-*   `-dry-run`: Show what would be done without actually moving/copying files (default: `false`).
-*   `-log-file`: Optional: Path to CSV file for logging classification details (path, filename, filesize, category\_id, score).
+*   `-move`: Move files to the output directory (default: `false`).
+*   `-copy`: Copy files to the output directory (default: `false`).
+*   `-dry-run`: Show what would be done without actually performing file operations (default: `false`).
+*   `-log-file`: Optional: Path to CSV file for logging classification details (path, filename, filesize, category\_id, score). Defaults to `classification.csv`. Use `-log-file=""` to disable logging.
+*   `-ollama`: Shortcut to use Ollama provider with default URL (`http://localhost:11434`) and model (`nomic-embed-text`). Overrides `-embedding-provider`, `-ollama-url`, and `-ollama-model` if used.
 
 **Filtering & Performance:**
 *   `-include`: Additional file extensions to include (comma-separated, e.g., `.epub,.log`).
@@ -106,7 +103,7 @@ This will:
 *   `-concurrency`: Number of concurrent file processing operations (default: `4`).
 
 **Embedding Provider Configuration:**
-*   `-embedding-provider`: Embedding provider to use (`'openai'` or `'ollama'`, default: `'openai'`).
+*   `-embedding-provider`: Embedding provider to use (`'openai'` or `'ollama'`, **default: `'openai'`**).
 *   `-openai-base-url`: Optional: Custom base URL for OpenAI or OpenAI-compatible API endpoint (e.g., for local models via LM Studio: `http://localhost:1234/v1`).
 *   `-openai-model`: Model name for OpenAI or compatible provider (default: `'text-embedding-3-small'`).
 *   `-ollama-url`: URL for Ollama API (default: `'http://localhost:11434'`).
@@ -114,14 +111,20 @@ This will:
 
 ### Examples
 
-Classify files using your custom system:
+Classify files using your custom system (with default OpenAI provider):
 ```bash
+# Ensure OPENAI_API_KEY is set. Logs to classification.csv by default.
 ./gds-classifier -source ~/Documents/ToSort -mapping ~/my_org_structure.yaml
+```
+
+Classify and copy files:
+```bash
+./gds-classifier -source ~/Downloads -mapping ./gds.yaml -copy
 ```
 
 Move files instead of copying:
 ```bash
-./gds-classifier -source ~/Downloads -mapping ./gds.yaml -move
+./gds-classifier -source ~/Downloads -mapping ./gds.yaml -move # Also logs to classification.csv by default
 ```
 
 Test classification without moving/copying:```bash
@@ -156,9 +159,19 @@ Classify using Ollama:
   -ollama-model nomic-embed-text # Or your chosen Ollama embedding model
 ```
 
-Log classification details to CSV:
+Classify using Ollama with the shortcut flag:
 ```bash
-./gds-classifier -source ~/Documents -mapping ./gds.yaml -log-file classification_log.csv
+./gds-classifier -source ~/Documents -mapping ./gds.yaml -ollama
+```
+
+Log classification details to a *different* CSV file:
+```bash
+./gds-classifier -source ~/Documents -mapping ./gds.yaml -log-file my_custom_log.csv
+```
+
+Disable logging and only perform classification (no file ops):
+```bash
+./gds-classifier -source ~/Documents -mapping ./gds.yaml -log-file=""
 ```
 
 ### Category YAML Structure
@@ -214,7 +227,7 @@ Files that don't match well with any specific `_valid: true` category are typica
 
 ## Troubleshooting
 
-*   **API Key Issues:** Ensure the `OPENAI_API_KEY` environment variable is set correctly or present in `.env` if using OpenAI. Check if your local server requires an API key.
+*   **API Key Issues (OpenAI Default):** Ensure the `OPENAI_API_KEY` environment variable is set correctly or present in `.env`. Check if your local server requires an API key if using `-openai-base-url`.
 *   **Provider Configuration:** Double-check `--embedding-provider`, `--openai-base-url`, `--openai-model`, `--ollama-url`, and `--ollama-model` flags match your setup (correct URLs, model names available on the server).
 *   **Connection Errors:** Ensure Ollama or your local OpenAI-compatible server is running and accessible from where you run the classifier. Check firewalls.
 *   **YAML Parsing Errors:** Verify your category mapping YAML file has correct syntax. Use a YAML validator if needed.
