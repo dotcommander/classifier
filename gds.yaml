@@ -1,0 +1,135 @@
+# Generic Directory System Template (gds-generic-template.yaml)
+#
+# This is a template demonstrating a hierarchical file organization system.
+# Customize it to fit your own needs.
+#
+# Key Concepts:
+#   - Keys (e.g., "01_Projects") define category names/codes.
+#   - Nesting creates the hierarchy (e.g., "01_Projects"/"Work").
+#   - `_valid: true` marks a category as a valid target for file classification.
+#     Files will only be placed in directories marked as valid.
+#   - `_description:` provides the semantic meaning for the category, used by the AI
+#     to match files. Write clear, descriptive text here for best results.
+#   - Categories without `_valid: true` act as organizational parents.
+
+"00_System": { # Root for system-related files and metadata
+  _valid: false,
+  _description: "Core system files, configuration, metadata, and operational logs related to this organization system itself.",
+  "Meta": {
+    _valid: true,
+    _description: "Configuration files, system settings, technical documentation, and operational parameters for managing this file system or related tools."
+  },
+  "Licenses": {
+    _valid: true,
+    _description: "Software licenses, copyright notices, terms of service, usage agreements, and related legal documents."
+  },
+  "Unsorted": { # Essential fallback category
+    _valid: true,
+    _description: "Temporary storage for newly added files awaiting classification, or items that do not clearly fit into other defined categories."
+  }
+}
+
+"10_Projects": { # Root for distinct efforts or initiatives
+  _valid: false,
+  _description: "Active or completed projects, both personal and professional. Each sub-directory represents a specific initiative.",
+  "Work": {
+    _valid: false,
+    _description: "Projects related to professional employment or client work.",
+    "Client_A_Project_X": { # Example: Replace with actual client/project names
+      _valid: true,
+      _description: "All documents, code, assets, communication, and reports related to Project X for Client A."
+    },
+    "Internal_Tool_Dev": { # Example
+      _valid: true,
+      _description: "Development files, planning documents, requirements, and documentation for internal software tools."
+    }
+  },
+  "Personal": {
+    _valid: false,
+    _description: "Personal projects, hobbies, and initiatives.",
+    "Hobby_Website": { # Example
+      _valid: true,
+      _description: "Files related to the development and content creation for a personal hobby website (e.g., code, images, articles)."
+    },
+    "Learn_Language_Y": { # Example
+      _valid: true,
+      _description: "Notes, exercises, resources, and practice materials for learning Language Y."
+    }
+  }
+}
+
+"20_Reference": { # Knowledge base and reference materials
+  _valid: false,
+  _description: "Information saved for future reference, learning materials, and knowledge base articles.",
+  "Technology": {
+    _valid: false,
+    _description: "Reference materials related to computing and technology.",
+    "Programming": {
+      _valid: true,
+      _description: "Code snippets, tutorials, API documentation, best practices, and articles related to software development and programming languages."
+    },
+    "Software_Manuals": {
+      _valid: true,
+      _description: "User manuals, guides, and documentation for various software applications."
+    }
+  },
+  "Articles_Papers": {
+    _valid: true,
+    _description: "Saved articles, research papers, whitepapers, and essays on various topics of interest."
+  },
+  "Personal_Development": {
+    _valid: true,
+    _description: "Resources, notes, and materials related to self-improvement, skill development, and personal growth."
+  }
+}
+
+"30_Media": { # Digital media assets
+  _valid: false,
+  _description: "Collection of personal digital media files.",
+  "Images": {
+    _valid: false,
+    _description: "Photographs and digital images.",
+    "Photos_Personal": {
+      _valid: true,
+      _description: "Personal photographs from events, trips, and daily life."
+    },
+    "Graphics_Assets": {
+      _valid: true,
+      _description: "Stock images, icons, logos, design elements, and other graphical assets."
+    }
+  },
+  "Audio": {
+     _valid: true, # Example: Making this directly valid
+     _description: "Audio files including music, podcasts, voice recordings, and sound effects."
+  },
+  "Video": {
+     _valid: true, # Example: Making this directly valid
+     _description: "Video files including personal recordings, downloaded videos, and screencasts."
+  },
+  "Documents_Scanned": {
+      _valid: true,
+      _description: "Scanned physical documents, receipts, letters, and important papers stored digitally."
+  }
+}
+
+"40_Admin_Finance": { # Personal administration and finances
+  _valid: false,
+  _description: "Personal administrative tasks, financial records, and household management.",
+  "Financial": {
+    _valid: true,
+    _description: "Bills, invoices, bank statements, tax documents, investment records, and budgeting spreadsheets."
+  },
+  "Household": {
+    _valid: true,
+    _description: "Documents related to home ownership or rental, utilities, insurance, and vehicle maintenance."
+  },
+  "Health_Medical": {
+    _valid: true,
+    _description: "Medical records, insurance information, fitness tracking data, and health-related documents."
+  }
+}
+
+"90_Archive": { # Completed or inactive items
+  _valid: true, # Allow direct archiving
+  _description: "Archived files from completed projects, old reference material, or items no longer in active use but kept for record-keeping."
+}

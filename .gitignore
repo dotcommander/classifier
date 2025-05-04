@@ -1,0 +1,3 @@
+*.embeddings.json
+gds-classifier
+.aider*
